@@ -1,0 +1,351 @@
+org 100h
+
+.model small
+
+.stack 100h
+
+.data
+
+menu:    DB 0Dh,0Ah,"1- Request a reservation",0Dh,0Ah
+DB "2- Duration of booking",0Dh,0Ah
+DB "3- Check for a Price",0Dh,0Ah
+DB "4- Exit",0Dh,0Ah
+DB "please choose: ", '$'
+
+CrLf     DB 13,10,'$'
+
+totalbill   DB 0Dh,0Ah,"the total bill is   : ",'$'
+ref_msg     DB 0Dh,0Ah,"booking reference   : ",'$'
+nobill_msg  DB 0Dh,0Ah,"please make a reservation first!",0Dh,0Ah,'$'
+
+room_info:
+DB 0Dh,0Ah,0Dh,0Ah,"1- Small room          1000  SR",0Dh,0Ah
+DB "2- Suite               2000  SR",0Dh,0Ah
+DB "3- Large room          1500  SR",0Dh,0Ah,'$'
+
+period_info:
+DB 0Dh,0Ah,0Dh,0Ah,"1- one day",0Dh,0Ah
+DB "2- two days",0Dh,0Ah
+DB "3- more than two days",0Dh,0Ah
+DB "enter the duration: ",'$'
+
+enter_order DB 0Dh,0Ah,"enter the order number (0 to finish): ",'$'
+day_number  DB 0Dh,0Ah,"enter number of days: ",'$'
+
+room_order  DB 255 DUP ('$')
+room_price  DW 0
+day_num     DB 1
+room_count  DB 0
+
+.code
+
+begin:
+mov ax, @data
+mov ds, ax
+
+start:
+mov dx, offset CrLf
+mov ah, 9
+int 21h
+
+mov dx, offset menu
+mov ah, 09h
+int 21h
+
+get_choice:
+mov ah, 1
+int 21h
+
+cmp al, '1'
+je  FIRST_CHOICE
+cmp al, '2'
+je  SECOND_CHOICE
+cmp al, '3'
+je  THIRD_CHOICE
+cmp al, '4'
+je  FORTH_CHOICE
+jmp get_choice
+
+;===== Make an order =====
+FIRST_CHOICE:
+mov dx, offset room_info
+mov ah, 9
+int 21h
+
+mov room_count, 0
+LEA SI, room_order
+
+get_order:
+mov dx, offset enter_order
+mov ah, 9
+int 21h
+
+mov ah, 1
+int 21h
+
+mov [SI], al
+inc SI
+
+cmp al, '0'
+je  start
+inc room_count
+jmp get_order
+
+;===== Handle period =====
+SECOND_CHOICE:
+mov dx, offset period_info
+mov ah, 9
+int 21h
+
+mov ah, 1
+int 21h
+
+cmp al, '1'
+je  SET_ONE_DAY
+cmp al, '2'
+je  SET_TWO_DAYS
+cmp al, '3'
+je  more_than_2
+jmp start
+
+SET_ONE_DAY:
+mov day_num, 1
+jmp start
+
+SET_TWO_DAYS:
+mov day_num, 2
+jmp start
+
+more_than_2:
+mov dx, offset day_number
+mov ah, 9
+int 21h
+
+call INDEC
+mov day_num, al
+jmp start
+
+;===== Calc price =====
+THIRD_CHOICE:
+
+; --- TEST (Week 6) ---
+; checks room_count without changing it
+; if zero it means no room was reserved
+mov al, room_count
+test al, al
+jz   NO_RESERVATION
+
+LEA SI, room_order
+
+fetch_order:
+mov al, [SI]
+inc SI
+
+cmp al, '0'
+je  finish
+cmp al, '1'
+je  SMALL_ROOM
+cmp al, '2'
+je  SUITE
+cmp al, '3'
+je  LARGE_ROOM
+jmp fetch_order
+
+NO_RESERVATION:
+mov dx, offset nobill_msg
+mov ah, 9
+int 21h
+jmp start
+
+SMALL_ROOM:
+mov ah, 0
+mov al, day_num
+mov bx, 1000
+mul bx
+add room_price, ax
+jmp fetch_order
+
+SUITE:
+mov ah, 0
+mov al, day_num
+mov bx, 2000
+mul bx
+add room_price, ax
+jmp fetch_order
+
+LARGE_ROOM:
+mov ah, 0
+mov al, day_num
+mov bx, 1500
+mul bx
+add room_price, ax
+jmp fetch_order
+
+finish:
+mov dx, offset CrLf
+mov ah, 9
+int 21h
+
+mov dx, offset totalbill
+mov ah, 9
+int 21h
+mov ax, room_price
+call OUTDEC
+
+; --- OUTHEX (Week 1 + Week 7) ---
+; shows the bill as a booking reference in hex
+; ROL is used inside OUTHEX (covers Week 7 rotate)
+mov dx, offset ref_msg
+mov ah, 9
+int 21h
+mov ax, room_price
+call OUTHEX
+
+mov dx, offset CrLf
+mov ah, 9
+int 21h
+
+; --- XOR (Week 6) ---
+; resets bill to zero for next customer
+xor ax, ax
+mov word ptr room_price, ax
+mov room_count, 0
+
+jmp start
+
+;===== Exit =====
+FORTH_CHOICE:
+mov ah, 4Ch
+int 21h
+
+;===== OUTDEC - original, no change =====
+OUTDEC PROC
+PUSH  AX
+PUSH  BX
+PUSH  CX
+PUSH  DX
+OR    AX, AX
+JGE   @END_IF1
+PUSH  AX
+MOV   DL, '-'
+MOV   AH, 2
+INT   21H
+POP   AX
+NEG   AX
+@END_IF1:
+XOR   CX, CX
+MOV   BX, 10
+@REPEAT1:
+XOR   DX, DX
+DIV   BX
+PUSH  DX
+INC   CX
+OR    AX, AX
+JNE   @REPEAT1
+MOV   AH, 2
+@PRINT_LOOP:
+POP   DX
+OR    DL, 30H
+INT   21H
+LOOP  @PRINT_LOOP
+POP   DX
+POP   CX
+POP   BX
+POP   AX
+RET
+OUTDEC ENDP
+
+;===== OUTHEX - new procedure (Week 1 + Week 7) =====
+; takes the bill number and shows it in hexadecimal
+; uses ROL to read each digit one by one
+; uses AND to keep only the part we need each time
+OUTHEX PROC
+PUSH  AX
+PUSH  BX
+PUSH  CX
+PUSH  DX
+mov   bx, ax
+mov   cx, 4
+@HEX_LOOP:
+rol   bx, 1
+rol   bx, 1
+rol   bx, 1
+rol   bx, 1
+mov   dl, bl
+and   dl, 0Fh
+cmp   dl, 10
+jl    @IS_NUM
+add   dl, 'A' - 10
+jmp   @PRINT_IT
+@IS_NUM:
+add   dl, '0'
+@PRINT_IT:
+mov   ah, 2
+int   21h
+loop  @HEX_LOOP
+POP   DX
+POP   CX
+POP   BX
+POP   AX
+RET
+OUTHEX ENDP
+
+;===== INDEC - original, no change =====
+INDEC PROC
+PUSH  BX
+PUSH  CX
+PUSH  DX
+@BEGIN:
+MOV   AH, 2
+MOV   DL, '?'
+INT   21H
+XOR   BX, BX
+XOR   CX, CX
+MOV   AH, 1
+INT   21H
+CMP   AL, '-'
+JE    @MINUS
+CMP   AL, '+'
+JE    @PLUS
+JMP   @REPEAT2
+@MINUS:
+MOV   CX, 1
+@PLUS:
+INT   21H
+@REPEAT2:
+CMP   AL, '0'
+JNGE  @NOT_DIGIT
+CMP   AL, '9'
+JNLE  @NOT_DIGIT
+AND   AX, 000FH
+PUSH  AX
+MOV   AX, 10
+MUL   BX
+POP   BX
+ADD   BX, AX
+MOV   AH, 1
+INT   21H
+CMP   AL, 0DH
+JNE   @REPEAT2
+MOV   AX, BX
+OR    CX, CX
+JE    @EXIT
+NEG   AX
+@EXIT:
+POP   DX
+POP   CX
+POP   BX
+RET
+@NOT_DIGIT:
+cmp   al, 0Dh
+je    @EXIT
+MOV   AH, 2
+MOV   DL, 0DH
+INT   21H
+MOV   DL, 0AH
+INT   21H
+JMP   @BEGIN
+INDEC ENDP
+
+end begin
+
